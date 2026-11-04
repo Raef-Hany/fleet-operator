@@ -1,4 +1,4 @@
-package tf
+package tfhash
 
 import (
 	"regexp"

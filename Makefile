@@ -259,3 +259,21 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+##@ Fleet operator workflows
+
+.PHONY: kind-up
+kind-up: ## Create a local kind cluster for the operator.
+	kind create cluster --name fleet-e2e --wait 120s
+
+.PHONY: kind-down
+kind-down: ## Delete the local kind cluster.
+	kind delete cluster --name fleet-e2e
+
+.PHONY: e2e
+e2e: ## Build images, create a kind cluster, deploy and run the e2e test (needs docker, kind, kubectl).
+	hack/e2e.sh
+
+.PHONY: test-linux
+test-linux: ## Run the full test suite (incl. envtest) in a Linux container; useful on Windows.
+	hack/dtest.sh go test ./...
