@@ -1,135 +1,98 @@
 # fleet-operator
-// TODO(user): Add simple overview of use/purpose
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A small Kubernetes operator (kubebuilder, Go) that manages a fleet of single-tenant environments as custom resources, and renders (but never applies) per-tenant Terraform with CDK for Terraform.
 
-## Getting Started
+> **This is a learning project.** It is not production software, has no users, and makes no claims about scale. It is **not affiliated with Sourcegraph**, and **no Sourcegraph code was copied**. The architecture is inspired by public material (see [Inspiration](#inspiration)). It never needs cloud credentials: Terraform is only synthesized and run through `terraform validate`.
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+## What it does
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+You create one cluster-scoped `Instance` per tenant:
 
-```sh
-make docker-build docker-push IMG=<some-registry>/fleet-operator:tag
+```yaml
+apiVersion: fleet.example.com/v1alpha1
+kind: Instance
+metadata:
+  name: acme
+spec:
+  tenant: acme        # becomes namespace inst-acme (immutable)
+  version: "6.7.0"    # podinfo image tag
+  size: small         # small | medium | large -> quota + resources
+  ring: internal      # internal | trial | prod (a label for now)
+  connectivity:       # optional
+    mode: psc         # none | psc | privatelink (placeholder)
+    allowedProjects: [example-consumer-project]
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+The controller reconciles it into:
 
-**Install the CRDs into the cluster:**
+- a **namespace** `inst-<tenant>` with a ServiceAccount, ResourceQuota, a default-deny NetworkPolicy plus an explicit allow rule, a Deployment (podinfo) and a Service, applied with server-side apply;
+- a **Kubernetes Job** `tf-<tenant>-<hash8>` that runs CDKTF to synthesize GCP Terraform and then `terraform validate`.
 
-```sh
-make install
+`status` reports `phase` (`Pending|Provisioning|Ready|Failed|Deleting`), `observedGeneration`, `terraformHash`, `lastTaskName` and the conditions `Ready`, `KubernetesReady`, `TerraformRendered`, `TerraformValidated`. Deleting an `Instance` runs a finalizer that removes the namespace and waits until it is gone.
+
+```mermaid
+flowchart LR
+  U[kubectl / GitOps] -->|Instance CR| API[(API server)]
+  API --> C[Instance controller]
+  C -->|server-side apply| NS[Namespace inst-tenant<br/>quota, policies, podinfo]
+  C -->|one Job per hash| J[Job tf-tenant-hash8<br/>CDKTF synth + terraform validate]
+  J -->|Job status| C
+  NS -->|Deployment status| C
+  C -->|phase + conditions| API
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the [decision records](docs/adr/). A write-up of what I learned: [docs/blog.md](docs/blog.md).
 
-```sh
-make deploy IMG=<some-registry>/fleet-operator:tag
+## Quickstart
+
+Needs Docker, [kind](https://kind.sigs.k8s.io/), kubectl, Go and `make`. The first run downloads images and the Terraform Google provider, so expect several minutes.
+
+```bash
+make deploy-kind                              # kind cluster, build + load both images, deploy the operator
+kubectl apply -f config/samples/              # three Instances, one per ring
+kubectl get instances -w                      # Provisioning -> Ready
+kubectl get ns | grep inst-                   # one namespace per tenant
+kubectl -n fleet-operator-system get jobs     # the per-instance Terraform tasks
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+Try an upgrade (`kubectl patch instance acme --type=merge -p '{"spec":{"version":"6.7.1"}}'`) and a delete (`kubectl delete instance globex`; its namespace disappears). Clean up with `make kind-down`.
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+## Development
 
-```sh
-kubectl apply -k config/samples/
-```
+| Command | What it does |
+|---|---|
+| `make test` | unit + envtest tests (needs Linux or a Linux container for envtest, and Node for the CDKTF tests) |
+| `make test-linux` | the same inside a Linux container via Docker (useful on Windows) |
+| `make lint` | golangci-lint (use the Go version from `go.mod`) |
+| `make e2e` | create a kind cluster, deploy, run the end-to-end test, delete the cluster |
 
->**NOTE**: Ensure that the samples has default values to test it out.
+## Design decisions
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+| Decision | Why |
+|---|---|
+| Cluster-scoped `Instance`, one per tenant | a cluster-scoped owner can own the tenant namespace |
+| Pure render functions with golden tests | most logic is testable without a cluster |
+| Server-side apply, dry-run compared before writing | idempotent, drift-correcting, no writes in steady state |
+| Finalizer that waits for the namespace to be gone | deletion is observable and re-entrant |
+| Terraform runs in a separate Job image | CDKTF needs Node (jsii); keeps the manager a small Go binary |
+| Job name `tf-<tenant>-<hash8>` | one Job per (instance, input hash); creating it is idempotent |
+| envtest for the reconciler, kind for readiness | envtest has no controllers, so rollouts are only proven in kind |
 
-```sh
-kubectl delete -k config/samples/
-```
+## What this is not
 
-**Delete the APIs(CRDs) from the cluster:**
+- Not production-grade. Single-replica podinfo, no persistence, no ingress, no real tenant workload.
+- Not Sourcegraph's implementation, and not a description of how Sourcegraph works internally.
+- Terraform is never applied. The `psc` output has never been run against a real GCP project, and `privatelink` is a labelled placeholder that renders only an output saying it is not implemented.
+- The ring-based rollout controller (`FleetRollout`) was **not built**. The `ring` field is currently just a label and a hash input.
+- CDKTF has been announced as deprecated by HashiCorp; it is used here to learn how it behaves, not as a recommendation.
+- Tested on Kubernetes 1.34 (envtest and kind). Not tested elsewhere.
 
-```sh
-make uninstall
-```
+## Inspiration
 
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/fleet-operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/fleet-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+- Robert Lin's 2024 post on scaling Sourcegraph's managed multi-single-tenant product (cited by title; I could not find a live URL to link).
+- [Building Sourcegraph Cloud as a single-tenant solution](https://sourcegraph.com/blog/single-tenant-cloud)
+- [Sourcegraph Cloud docs](https://sourcegraph.com/docs/cloud), including the private connectivity pages.
 
 ## License
 
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Apache 2.0 (kubebuilder scaffold headers). See [LICENSE](LICENSE).
