@@ -270,6 +270,10 @@ kind-up: ## Create a local kind cluster for the operator.
 kind-down: ## Delete the local kind cluster.
 	kind delete cluster --name fleet-e2e
 
+.PHONY: deploy-kind
+deploy-kind: ## Create a kind cluster, build + load images and deploy the operator (quickstart).
+	hack/deploy-kind.sh
+
 .PHONY: e2e
 e2e: ## Build images, create a kind cluster, deploy and run the e2e test (needs docker, kind, kubectl).
 	hack/e2e.sh
