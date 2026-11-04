@@ -1,0 +1,27 @@
+# Image for the per-instance Terraform "task" Job (see docs/adr/0008-terraform-as-job.md).
+# It synthesizes Terraform JSON with CDKTF (needs Node for jsii) and validates it with
+# `terraform validate`. It never runs `terraform apply` and holds no credentials.
+ARG GO_VERSION=1.27
+ARG NODE_VERSION=22
+ARG TERRAFORM_VERSION=1.16.6
+
+FROM golang:${GO_VERSION} AS builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/tfrender ./cmd/tfrender
+
+FROM hashicorp/terraform:${TERRAFORM_VERSION} AS terraform
+
+FROM node:${NODE_VERSION}-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/tfrender /usr/local/bin/tfrender
+COPY --from=terraform /bin/terraform /usr/local/bin/terraform
+RUN useradd --uid 65532 --create-home --shell /usr/sbin/nologin runner \
+    && mkdir /work && chown runner /work
+USER 65532:65532
+WORKDIR /work
+ENV HOME=/home/runner
+ENTRYPOINT ["tfrender"]
