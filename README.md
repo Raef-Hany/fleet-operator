@@ -49,7 +49,7 @@ Needs Docker, [kind](https://kind.sigs.k8s.io/), kubectl, Go and `make`. The fir
 
 ```bash
 make deploy-kind                              # kind cluster, build + load both images, deploy the operator
-kubectl apply -f config/samples/              # three Instances, one per ring
+kubectl apply -f config/samples/fleet_v1alpha1_instance.yaml           # three Instances, one per ring
 kubectl get instances -w                      # Provisioning -> Ready
 kubectl get ns | grep inst-                   # one namespace per tenant
 kubectl -n fleet-operator-system get jobs     # the per-instance Terraform tasks
