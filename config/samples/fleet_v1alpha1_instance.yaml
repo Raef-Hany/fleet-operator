@@ -1,9 +1,36 @@
+# Three tenants, one per upgrade ring. Applying this file creates three namespaces
+# (inst-acme, inst-globex, inst-initech), each with a podinfo Deployment.
 apiVersion: fleet.example.com/v1alpha1
 kind: Instance
 metadata:
-  labels:
-    app.kubernetes.io/name: fleet-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: instance-sample
+  name: acme
 spec:
-  # TODO(user): Add fields here
+  tenant: acme
+  version: "6.7.0"
+  size: small
+  ring: internal
+---
+apiVersion: fleet.example.com/v1alpha1
+kind: Instance
+metadata:
+  name: globex
+spec:
+  tenant: globex
+  version: "6.7.0"
+  size: medium
+  ring: trial
+---
+apiVersion: fleet.example.com/v1alpha1
+kind: Instance
+metadata:
+  name: initech
+spec:
+  tenant: initech
+  version: "6.7.0"
+  size: large
+  ring: prod
+  region: europe-west1
+  connectivity:
+    mode: psc
+    allowedProjects:
+      - example-consumer-project
