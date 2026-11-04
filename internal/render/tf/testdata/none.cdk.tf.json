@@ -1,0 +1,98 @@
+{
+  "//": {
+    "metadata": {
+      "backend": "local",
+      "stackName": "inst",
+      "version": "0.21.0"
+    },
+    "outputs": {
+    }
+  },
+  "provider": {
+    "google": [
+      {
+        "project": "${var.project_id}",
+        "region": "europe-west1"
+      }
+    ]
+  },
+  "resource": {
+    "google_compute_network": {
+      "net": {
+        "//": {
+          "metadata": {
+            "path": "inst/net",
+            "uniqueId": "net"
+          }
+        },
+        "auto_create_subnetworks": false,
+        "description": "tenant=acme ring=trial managed-by=fleet-operator",
+        "name": "net-acme"
+      }
+    },
+    "google_compute_subnetwork": {
+      "subnet": {
+        "//": {
+          "metadata": {
+            "path": "inst/subnet",
+            "uniqueId": "subnet"
+          }
+        },
+        "description": "tenant=acme ring=trial managed-by=fleet-operator",
+        "ip_cidr_range": "10.10.0.0/24",
+        "name": "subnet-acme",
+        "network": "${google_compute_network.net.name}",
+        "region": "europe-west1"
+      }
+    },
+    "google_service_account": {
+      "sa": {
+        "//": {
+          "metadata": {
+            "path": "inst/sa",
+            "uniqueId": "sa"
+          }
+        },
+        "account_id": "sa-acme",
+        "description": "tenant=acme ring=trial managed-by=fleet-operator"
+      }
+    },
+    "google_storage_bucket": {
+      "bucket": {
+        "//": {
+          "metadata": {
+            "path": "inst/bucket",
+            "uniqueId": "bucket"
+          }
+        },
+        "force_destroy": false,
+        "labels": {
+          "managed-by": "fleet-operator",
+          "ring": "trial",
+          "tenant": "acme"
+        },
+        "location": "europe-west1",
+        "name": "fleet-acme-data",
+        "uniform_bucket_level_access": true
+      }
+    }
+  },
+  "terraform": {
+    "backend": {
+      "local": {
+        "path": "terraform.tfstate"
+      }
+    },
+    "required_providers": {
+      "google": {
+        "source": "google",
+        "version": "6.50.0"
+      }
+    }
+  },
+  "variable": {
+    "project_id": {
+      "type": "string"
+    }
+  }
+}
