@@ -254,6 +254,7 @@ func (r *InstanceReconciler) applyDesired(ctx context.Context, inst *fleetv1alph
 		if !dirty {
 			continue
 		}
+		//nolint:staticcheck // client.Apply patch type is deprecated in controller-runtime v0.25 in favour of Client.Apply(); migrating is tracked as a follow-up
 		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
 			return fmt.Errorf("apply %s %s: %w", kindOf(obj), obj.GetName(), err)
 		}
@@ -266,6 +267,7 @@ func (r *InstanceReconciler) applyDesired(ctx context.Context, inst *fleetv1alph
 // managedFields and resourceVersion, because a dry run does not bump resourceVersion.
 func (r *InstanceReconciler) needsApply(ctx context.Context, obj client.Object) (bool, error) {
 	dry := obj.DeepCopyObject().(client.Object)
+	//nolint:staticcheck // see above
 	if err := r.Patch(ctx, dry, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership, client.DryRunAll); err != nil {
 		return false, fmt.Errorf("dry-run apply %s %s: %w", kindOf(obj), obj.GetName(), err)
 	}

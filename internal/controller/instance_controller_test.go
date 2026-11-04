@@ -38,11 +38,11 @@ func newTestReconciler(c client.Client) (*InstanceReconciler, *events.FakeRecord
 	}, rec
 }
 
-func createInstance(t *testing.T, name, tenant, version string) {
+func createInstance(t *testing.T, name, tenant string) {
 	t.Helper()
 	inst := &fleetv1alpha1.Instance{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       fleetv1alpha1.InstanceSpec{Tenant: tenant, Version: version},
+		Spec:       fleetv1alpha1.InstanceSpec{Tenant: tenant, Version: "6.5.0"},
 	}
 	if err := k8sClient.Create(context.Background(), inst); err != nil {
 		t.Fatalf("create instance %s: %v", name, err)
@@ -145,7 +145,7 @@ func assertCondition(t *testing.T, inst *fleetv1alpha1.Instance, condType string
 func TestCreateProvisionsKubernetesObjects(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "create-basic", "acme-create"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 
 	res := reconcileName(t, r, name)
@@ -200,7 +200,7 @@ func TestCreateProvisionsKubernetesObjects(t *testing.T) {
 
 func TestDeploymentAvailableMakesInstanceReady(t *testing.T) {
 	const name, tenant = "ready-basic", "acme-ready"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
@@ -221,7 +221,7 @@ func TestDeploymentAvailableMakesInstanceReady(t *testing.T) {
 func TestVersionBumpRollsOutNewImageAndTracksGeneration(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "bump-version", "acme-bump"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
@@ -258,7 +258,7 @@ func TestVersionBumpRollsOutNewImageAndTracksGeneration(t *testing.T) {
 func TestDeletedDeploymentIsRecreated(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "drift-deployment", "acme-drift"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 
@@ -276,7 +276,7 @@ func TestDeletedDeploymentIsRecreated(t *testing.T) {
 func TestManualReplicaEditIsCorrected(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "drift-replicas", "acme-replicas"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 
@@ -347,7 +347,7 @@ func (w *writeCounter) wrap(base client.WithWatch) client.Client {
 
 func TestSteadyStateReconcileIssuesNoPersistedWrites(t *testing.T) {
 	const name, tenant = "steady-state", "acme-steady"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
@@ -391,7 +391,7 @@ func TestNamespaceConflictFailsWithoutAdoption(t *testing.T) {
 			if err := k8sClient.Create(ctx, ns); err != nil {
 				t.Fatalf("create pre-existing namespace: %v", err)
 			}
-			createInstance(t, name, tenant, "6.5.0")
+			createInstance(t, name, tenant)
 			r, rec := newTestReconciler(k8sClient)
 
 			res := reconcileName(t, r, name)
@@ -448,7 +448,7 @@ func TestNotFoundInstanceIsNoOp(t *testing.T) {
 func TestDeletionWaitsForNamespaceTerminationThenReleasesFinalizer(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "delete-wait", "acme-delwait"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, rec := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
@@ -502,7 +502,7 @@ func TestDeletionWaitsForNamespaceTerminationThenReleasesFinalizer(t *testing.T)
 func TestDeletionReleasesFinalizerWhenNamespaceAlreadyGone(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "delete-gone", "acme-delgone"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 
@@ -526,7 +526,7 @@ func TestDeletionReleasesFinalizerWhenNamespaceAlreadyGone(t *testing.T) {
 
 func TestEventsEmittedOnTransitionsOnly(t *testing.T) {
 	const name, tenant = "events-basic", "acme-events"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, rec := newTestReconciler(k8sClient)
 
 	reconcileName(t, r, name)

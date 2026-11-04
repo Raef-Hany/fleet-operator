@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	fleetv1alpha1 "github.com/Raef-Hany/fleet-operator/api/v1alpha1"
@@ -51,7 +51,7 @@ func Hash(spec fleetv1alpha1.InstanceSpec) string {
 		mode = ConnectivityMode(spec.Connectivity.Mode)
 		projects = append(projects, spec.Connectivity.AllowedProjects...)
 	}
-	sort.Strings(projects)
+	slices.Sort(projects)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "tenant=%q\n", spec.Tenant)

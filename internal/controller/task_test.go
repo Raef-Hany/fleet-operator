@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -258,9 +259,9 @@ func failTaskJob(t *testing.T, name, message string) {
 
 func TestTaskJobCreatedOncePerHash(t *testing.T) {
 	const name, tenant = "task-once", "acme-once"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		reconcileName(t, r, name)
 	}
 
@@ -287,7 +288,7 @@ func jobNames(jobs []batchv1.Job) []string {
 
 func TestTaskSuccessMakesInstanceReady(t *testing.T) {
 	const name, tenant = "task-success", "acme-tasksuccess"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, rec := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
@@ -322,7 +323,7 @@ func TestTaskSuccessMakesInstanceReady(t *testing.T) {
 
 func TestTaskFailureIsTerminal(t *testing.T) {
 	const name, tenant = "task-failure", "acme-taskfail"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, rec := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	drainEvents(rec)
@@ -366,7 +367,7 @@ func findCondition(inst *fleetv1alpha1.Instance, typ string) *metav1.Condition {
 func TestHashChangeCreatesNewJobAndOldIsNeverRecreated(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "task-region", "acme-region"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	oldName := taskJobName(tenant, tfhash.Hash(getInstance(t, name).Spec))
@@ -423,18 +424,13 @@ func jobNamesOf(t *testing.T, tenant string) []string {
 }
 
 func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }
 
 func TestVersionAndSizeChangeDoNotCreateJob(t *testing.T) {
 	ctx := context.Background()
 	const name, tenant = "task-version", "acme-taskver"
-	createInstance(t, name, tenant, "6.5.0")
+	createInstance(t, name, tenant)
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)

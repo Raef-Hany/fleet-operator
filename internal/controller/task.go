@@ -82,14 +82,14 @@ func BuildTaskJob(inst *fleetv1alpha1.Instance, hash, image, namespace string) *
 			}},
 		},
 		Spec: batchv1.JobSpec{
-			TTLSecondsAfterFinished: ptrTo(taskTTLSeconds),
-			BackoffLimit:            ptrTo(taskBackoffLimit),
+			TTLSecondsAfterFinished: new(taskTTLSeconds),
+			BackoffLimit:            new(taskBackoffLimit),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot:   ptrTo(true),
+						RunAsNonRoot:   new(true),
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 					Volumes: []corev1.Volume{{
@@ -106,8 +106,8 @@ func BuildTaskJob(inst *fleetv1alpha1.Instance, hash, image, namespace string) *
 							MountPath: taskWorkDir,
 						}},
 						SecurityContext: &corev1.SecurityContext{
-							AllowPrivilegeEscalation: ptrTo(false),
-							RunAsNonRoot:             ptrTo(true),
+							AllowPrivilegeEscalation: new(false),
+							RunAsNonRoot:             new(true),
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 						},
 						Resources: corev1.ResourceRequirements{
@@ -228,6 +228,4 @@ func taskConditions(t taskState) []metav1.Condition {
 	}
 }
 
-func ptrTo[T any](v T) *T {
-	return &v
-}
+//go:fix inline

@@ -50,9 +50,9 @@ func modeInstance(mode fleetv1alpha1.ConnectivityMode) *fleetv1alpha1.Instance {
 // resourcesOfType returns the bodies of every resource of the given Terraform type.
 func resourcesOfType(t *testing.T, doc map[string]any, typ string) []map[string]any {
 	t.Helper()
-	var out []map[string]any
 	res, _ := doc["resource"].(map[string]any)
 	byLabel, _ := res[typ].(map[string]any)
+	out := make([]map[string]any, 0, len(byLabel))
 	for label, body := range byLabel {
 		b, ok := body.(map[string]any)
 		if !ok {

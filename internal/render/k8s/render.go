@@ -2,6 +2,8 @@
 package k8s
 
 import (
+	"maps"
+
 	fleetv1alpha1 "github.com/Raef-Hany/fleet-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -68,9 +70,7 @@ func Render(inst *fleetv1alpha1.Instance) []client.Object {
 			keyTenant:    tenant,
 			keyRing:      ring,
 		}
-		for k, v := range extra {
-			m[k] = v
-		}
+		maps.Copy(m, extra)
 		return m
 	}
 	selectorLabels := map[string]string{keyName: podinfoName}
@@ -118,8 +118,8 @@ func Render(inst *fleetv1alpha1.Instance) []client.Object {
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{
 				From: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}},
 				Ports: []networkingv1.NetworkPolicyPort{{
-					Protocol: ptrTo(corev1.ProtocolTCP),
-					Port:     ptrTo(intstr.FromInt32(podinfoPort)),
+					Protocol: new(corev1.ProtocolTCP),
+					Port:     new(intstr.FromInt32(podinfoPort)),
 				}},
 			}},
 			Egress: []networkingv1.NetworkPolicyEgressRule{{
@@ -127,8 +127,8 @@ func Render(inst *fleetv1alpha1.Instance) []client.Object {
 					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"},
 				}}},
 				Ports: []networkingv1.NetworkPolicyPort{
-					{Protocol: ptrTo(corev1.ProtocolTCP), Port: ptrTo(dnsPort)},
-					{Protocol: ptrTo(corev1.ProtocolUDP), Port: ptrTo(dnsPort)},
+					{Protocol: new(corev1.ProtocolTCP), Port: new(dnsPort)},
+					{Protocol: new(corev1.ProtocolUDP), Port: new(dnsPort)},
 				},
 			}},
 		},
@@ -198,6 +198,4 @@ func Render(inst *fleetv1alpha1.Instance) []client.Object {
 	}
 }
 
-func ptrTo[T any](v T) *T {
-	return &v
-}
+//go:fix inline
