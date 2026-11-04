@@ -18,37 +18,16 @@ import (
 	"github.com/cdktf/cdktf-provider-google-go/google/v16/storagebucket"
 
 	fleetv1alpha1 "github.com/Raef-Hany/fleet-operator/api/v1alpha1"
+	"github.com/Raef-Hany/fleet-operator/internal/render/tfhash"
 )
 
 const (
 	stackName          = "inst"
-	defaultRegion      = "us-central1"
 	subnetCIDR         = "10.10.0.0/24"
 	privateLinkMessage = "AWS PrivateLink is not implemented in this learning project; this output is a placeholder and no AWS PrivateLink resources are rendered"
 	privateLinkOutput  = "privatelink_not_implemented"
 	managedBy          = "fleet-operator"
 )
-
-func region(r string) string {
-	if r == "" {
-		return defaultRegion
-	}
-	return r
-}
-
-func ring(r fleetv1alpha1.Ring) string {
-	if r == "" {
-		return string(fleetv1alpha1.RingProd)
-	}
-	return string(r)
-}
-
-func connectivityMode(m fleetv1alpha1.ConnectivityMode) fleetv1alpha1.ConnectivityMode {
-	if m == "" {
-		return fleetv1alpha1.ConnectivityNone
-	}
-	return m
-}
 
 // accountID builds a service account id of the form sa-<tenant>. It is kept
 // within the 6..30 character range and ends in a letter or digit.
@@ -72,11 +51,11 @@ func description(tenant, ring string) string {
 // buildStack declares the stack for spec in app.
 func buildStack(app cdktf.App, spec fleetv1alpha1.InstanceSpec) {
 	tenant := spec.Tenant
-	reg := region(spec.Region)
-	rng := ring(spec.Ring)
+	reg := tfhash.Region(spec.Region)
+	rng := tfhash.Ring(spec.Ring)
 	mode := fleetv1alpha1.ConnectivityNone
 	if spec.Connectivity != nil {
-		mode = connectivityMode(spec.Connectivity.Mode)
+		mode = tfhash.ConnectivityMode(spec.Connectivity.Mode)
 	}
 	labels := &map[string]*string{
 		"tenant":     jsii.String(tenant),

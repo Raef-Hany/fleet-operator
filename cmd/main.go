@@ -45,6 +45,15 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+// defaultTaskNamespace is the operator's own namespace (from the downward API), falling back to
+// the kustomize default when the manager runs outside a cluster.
+func defaultTaskNamespace() string {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return "fleet-operator-system"
+}
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
@@ -62,6 +71,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var taskImage, taskNamespace string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -82,6 +92,10 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&taskImage, "task-image", "fleet-operator/tfrender:dev",
+		"Image of the per-instance Terraform task Job.")
+	flag.StringVar(&taskNamespace, "task-namespace", defaultTaskNamespace(),
+		"Namespace in which task Jobs are created. Defaults to $POD_NAMESPACE.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -183,9 +197,11 @@ func main() {
 	}
 
 	if err := (&controller.InstanceReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorder("fleet-operator-instance"),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      mgr.GetEventRecorder("fleet-operator-instance"),
+		TaskNamespace: taskNamespace,
+		TaskImage:     taskImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "instance")
 		os.Exit(1)

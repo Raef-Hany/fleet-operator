@@ -1,11 +1,15 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -54,6 +58,13 @@ func TestMain(m *testing.M) {
 	clientset, err = kubernetes.NewForConfig(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "clientset failed:", err)
+		_ = testEnv.Stop()
+		os.Exit(1)
+	}
+
+	if _, err := clientset.CoreV1().Namespaces().Create(context.Background(),
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testTaskNamespace}}, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		fmt.Fprintln(os.Stderr, "create task namespace:", err)
 		_ = testEnv.Stop()
 		os.Exit(1)
 	}

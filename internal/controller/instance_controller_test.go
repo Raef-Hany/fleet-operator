@@ -29,7 +29,13 @@ const testPodinfoRepo = "ghcr.io/stefanprodan/podinfo"
 // newTestReconciler returns a reconciler wired to c and a fake recorder that the test can inspect.
 func newTestReconciler(c client.Client) (*InstanceReconciler, *events.FakeRecorder) {
 	rec := events.NewFakeRecorder(100)
-	return &InstanceReconciler{Client: c, Scheme: testScheme, Recorder: rec}, rec
+	return &InstanceReconciler{
+		Client:        c,
+		Scheme:        testScheme,
+		Recorder:      rec,
+		TaskNamespace: testTaskNamespace,
+		TaskImage:     testTaskImage,
+	}, rec
 }
 
 func createInstance(t *testing.T, name, tenant, version string) {
@@ -198,6 +204,7 @@ func TestDeploymentAvailableMakesInstanceReady(t *testing.T) {
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
+	completeTaskJob(t, name)
 
 	res := reconcileName(t, r, name)
 	if res != (ctrl.Result{}) {
@@ -218,6 +225,7 @@ func TestVersionBumpRollsOutNewImageAndTracksGeneration(t *testing.T) {
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
+	completeTaskJob(t, name)
 	reconcileName(t, r, name)
 
 	inst := getInstance(t, name)
@@ -343,6 +351,7 @@ func TestSteadyStateReconcileIssuesNoPersistedWrites(t *testing.T) {
 	r, _ := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
+	completeTaskJob(t, name)
 	reconcileName(t, r, name) // settle into Ready
 
 	before := getInstance(t, name)
@@ -443,6 +452,7 @@ func TestDeletionWaitsForNamespaceTerminationThenReleasesFinalizer(t *testing.T)
 	r, rec := newTestReconciler(k8sClient)
 	reconcileName(t, r, name)
 	markDeploymentReady(t, tenant)
+	completeTaskJob(t, name)
 	reconcileName(t, r, name)
 	drainEvents(rec)
 
@@ -531,6 +541,7 @@ func TestEventsEmittedOnTransitionsOnly(t *testing.T) {
 	}
 
 	markDeploymentReady(t, tenant)
+	completeTaskJob(t, name)
 	reconcileName(t, r, name)
 	got = drainEvents(rec)
 	if len(got) != 1 || !strings.HasPrefix(got[0], "Normal "+string(fleetv1alpha1.PhaseReady)) {
@@ -549,11 +560,14 @@ func TestComputePhase(t *testing.T) {
 		in   phaseInput
 		want fleetv1alpha1.Phase
 	}{
-		{"deleting wins over ready", phaseInput{Deleting: true, Applied: true, KubernetesReady: true}, fleetv1alpha1.PhaseDeleting},
+		{"deleting wins over ready", phaseInput{Deleting: true, Applied: true, KubernetesReady: true, TerraformValidated: true}, fleetv1alpha1.PhaseDeleting},
 		{"conflict fails", phaseInput{Conflict: true}, fleetv1alpha1.PhaseFailed},
-		{"conflict beats ready", phaseInput{Conflict: true, Applied: true, KubernetesReady: true}, fleetv1alpha1.PhaseFailed},
+		{"conflict beats ready", phaseInput{Conflict: true, Applied: true, KubernetesReady: true, TerraformValidated: true}, fleetv1alpha1.PhaseFailed},
+		{"terraform failure fails", phaseInput{Applied: true, KubernetesReady: true, TerraformFailed: true}, fleetv1alpha1.PhaseFailed},
 		{"not applied is pending", phaseInput{}, fleetv1alpha1.PhasePending},
-		{"applied and ready", phaseInput{Applied: true, KubernetesReady: true}, fleetv1alpha1.PhaseReady},
+		{"applied and ready", phaseInput{Applied: true, KubernetesReady: true, TerraformValidated: true}, fleetv1alpha1.PhaseReady},
+		{"ready needs terraform validated", phaseInput{Applied: true, KubernetesReady: true}, fleetv1alpha1.PhaseProvisioning},
+		{"ready needs kubernetes ready", phaseInput{Applied: true, TerraformValidated: true}, fleetv1alpha1.PhaseProvisioning},
 		{"applied not ready", phaseInput{Applied: true}, fleetv1alpha1.PhaseProvisioning},
 	}
 	for _, tc := range tests {

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -59,20 +60,23 @@ const (
 )
 
 // phaseInput is everything computePhase needs to choose the Instance phase.
-// Terraform work added later extends this struct: Applied stays false until
-// the upstream (Terraform) step has released the Kubernetes objects.
+// Applied is false only when no Kubernetes objects were applied in this pass.
 type phaseInput struct {
-	Deleting        bool
-	Conflict        bool
-	Applied         bool
-	KubernetesReady bool
+	Deleting           bool
+	Conflict           bool
+	Applied            bool
+	KubernetesReady    bool
+	TerraformFailed    bool
+	TerraformValidated bool
 }
 
 // InstanceReconciler reconciles a Instance object. Recorder must be non-nil.
 type InstanceReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder events.EventRecorder
+	Scheme        *runtime.Scheme
+	Recorder      events.EventRecorder
+	TaskNamespace string
+	TaskImage     string
 }
 
 // +kubebuilder:rbac:groups=fleet.example.com,resources=instances,verbs=get;list;watch;create;update;patch;delete
@@ -144,8 +148,27 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	task, err := r.reconcileTask(ctx, inst)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	in.TerraformFailed = task.failed
+	in.TerraformValidated = task.succeeded
+
 	phase := computePhase(in)
-	if err := r.setStatus(ctx, inst, phase, kube); err != nil {
+	su := statusUpdate{
+		phase:         phase,
+		conditions:    append([]metav1.Condition{kube}, taskConditions(task)...),
+		terraformHash: task.hash,
+		lastTaskName:  task.name,
+	}
+	switch {
+	case in.Conflict:
+		su.failReason, su.failMessage = reasonNamespaceConflict, conflict
+	case task.failed:
+		su.failReason, su.failMessage = reasonTaskFailed, task.message
+	}
+	if err := r.setStatus(ctx, inst, su); err != nil {
 		return ctrl.Result{}, err
 	}
 	if phase == fleetv1alpha1.PhaseProvisioning {
@@ -182,13 +205,13 @@ func (r *InstanceReconciler) reconcileDelete(ctx context.Context, inst *fleetv1a
 				return ctrl.Result{}, fmt.Errorf("delete namespace: %w", err)
 			}
 		}
-		if err := r.setStatus(ctx, inst, phase, kube); err != nil {
+		if err := r.setStatus(ctx, inst, statusUpdate{phase: phase, conditions: []metav1.Condition{kube}}); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: deletionRequeue}, nil
 	}
 
-	if err := r.setStatus(ctx, inst, phase, kube); err != nil {
+	if err := r.setStatus(ctx, inst, statusUpdate{phase: phase, conditions: []metav1.Condition{kube}}); err != nil {
 		return ctrl.Result{}, err
 	}
 	base := inst.DeepCopy()
@@ -256,16 +279,35 @@ func (r *InstanceReconciler) needsApply(ctx context.Context, obj client.Object) 
 	return !sameContent(dry, live), nil
 }
 
-// setStatus writes the phase, observedGeneration and conditions only when they change, and emits
-// one event per phase transition.
-func (r *InstanceReconciler) setStatus(ctx context.Context, inst *fleetv1alpha1.Instance, phase fleetv1alpha1.Phase, kube metav1.Condition) error {
+// statusUpdate is the desired status for one reconcile pass.
+type statusUpdate struct {
+	phase      fleetv1alpha1.Phase
+	conditions []metav1.Condition // KubernetesReady and, when reconciled, the Terraform conditions
+	// terraformHash and lastTaskName are left unchanged when empty (deletion path).
+	terraformHash string
+	lastTaskName  string
+	// failReason and failMessage describe the cause for the Warning event emitted when phase becomes Failed.
+	failReason  string
+	failMessage string
+}
+
+// setStatus writes the status only when it changes, and emits one event per phase transition.
+func (r *InstanceReconciler) setStatus(ctx context.Context, inst *fleetv1alpha1.Instance, su statusUpdate) error {
 	before := inst.Status.DeepCopy()
 
-	kube.ObservedGeneration = inst.Generation
-	inst.Status.Phase = phase
+	inst.Status.Phase = su.phase
 	inst.Status.ObservedGeneration = inst.Generation
-	meta.SetStatusCondition(&inst.Status.Conditions, kube)
-	meta.SetStatusCondition(&inst.Status.Conditions, readyCondition(phase, inst.Generation))
+	if su.terraformHash != "" {
+		inst.Status.TerraformHash = su.terraformHash
+	}
+	if su.lastTaskName != "" {
+		inst.Status.LastTaskName = su.lastTaskName
+	}
+	for _, c := range su.conditions {
+		c.ObservedGeneration = inst.Generation
+		meta.SetStatusCondition(&inst.Status.Conditions, c)
+	}
+	meta.SetStatusCondition(&inst.Status.Conditions, readyCondition(su.phase, inst.Generation))
 
 	if apiequality.Semantic.DeepEqual(*before, inst.Status) {
 		return nil
@@ -273,32 +315,32 @@ func (r *InstanceReconciler) setStatus(ctx context.Context, inst *fleetv1alpha1.
 	if err := r.Status().Update(ctx, inst); err != nil {
 		return fmt.Errorf("update status: %w", err)
 	}
-	if before.Phase != phase {
-		r.emitPhaseEvent(inst, phase, kube)
+	if before.Phase != su.phase {
+		r.emitPhaseEvent(inst, su)
 	}
 	return nil
 }
 
-func (r *InstanceReconciler) emitPhaseEvent(inst *fleetv1alpha1.Instance, phase fleetv1alpha1.Phase, kube metav1.Condition) {
-	if phase == fleetv1alpha1.PhaseFailed {
-		r.Recorder.Eventf(inst, nil, corev1.EventTypeWarning, kube.Reason, "PhaseChange", "%s", kube.Message)
+func (r *InstanceReconciler) emitPhaseEvent(inst *fleetv1alpha1.Instance, su statusUpdate) {
+	if su.phase == fleetv1alpha1.PhaseFailed {
+		r.Recorder.Eventf(inst, nil, corev1.EventTypeWarning, su.failReason, "PhaseChange", "%s", su.failMessage)
 		return
 	}
-	r.Recorder.Eventf(inst, nil, corev1.EventTypeNormal, string(phase), "PhaseChange",
-		"instance %s is now %s", inst.Name, phase)
+	r.Recorder.Eventf(inst, nil, corev1.EventTypeNormal, string(su.phase), "PhaseChange",
+		"instance %s is now %s", inst.Name, su.phase)
 }
 
-// computePhase chooses the phase. Precedence: Deleting, Failed (conflict), Pending (not yet applied),
-// Ready, then Provisioning.
+// computePhase chooses the phase. Precedence: Deleting, Failed (conflict or Terraform failure),
+// Pending (not yet applied), Ready (Kubernetes and Terraform both ready), then Provisioning.
 func computePhase(in phaseInput) fleetv1alpha1.Phase {
 	switch {
 	case in.Deleting:
 		return fleetv1alpha1.PhaseDeleting
-	case in.Conflict:
+	case in.Conflict, in.TerraformFailed:
 		return fleetv1alpha1.PhaseFailed
 	case !in.Applied:
 		return fleetv1alpha1.PhasePending
-	case in.KubernetesReady:
+	case in.KubernetesReady && in.TerraformValidated:
 		return fleetv1alpha1.PhaseReady
 	default:
 		return fleetv1alpha1.PhaseProvisioning
@@ -371,6 +413,7 @@ func (r *InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.ResourceQuota{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Owns(&batchv1.Job{}).
 		Owns(&corev1.Namespace{}).
 		Named("instance").
 		Complete(r)
