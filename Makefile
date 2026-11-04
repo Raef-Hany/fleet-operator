@@ -264,7 +264,7 @@ endef
 
 .PHONY: kind-up
 kind-up: ## Create a local kind cluster for the operator.
-	kind create cluster --name fleet-e2e --wait 120s
+	kind create cluster --name fleet-e2e --image kindest/node:v1.34.0 --wait 180s
 
 .PHONY: kind-down
 kind-down: ## Delete the local kind cluster.

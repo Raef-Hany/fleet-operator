@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -458,4 +459,17 @@ func TestVersionAndSizeChangeDoNotCreateJob(t *testing.T) {
 		t.Errorf("version/size change created jobs %v, want still exactly 1", got)
 	}
 	assertCondition(t, getInstance(t, name), fleetv1alpha1.ConditionTerraformValidated, metav1.ConditionTrue, reasonTaskSucceeded)
+}
+
+// The prebuilt Google provider bundle is huge; with a 512Mi limit the Node child
+// process behind jsii is OOM-killed (exit 137) in a real cluster. envtest cannot
+// catch this, the kind e2e run did.
+func TestBuildTaskJobMemoryLimitFitsJsiiGoogleProvider(t *testing.T) {
+	inst := sampleTaskInstance("acme")
+	job := BuildTaskJob(inst, tfhash.Hash(inst.Spec), testTaskImage, "ns-ops")
+	lim := job.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceMemory]
+	min := resource.MustParse("2Gi")
+	if lim.Cmp(min) < 0 {
+		t.Errorf("memory limit = %s, want at least %s", lim.String(), min.String())
+	}
 }
